@@ -33,45 +33,91 @@ jobs:
       - name: Install test dependencies
         run: pip install pytest ruff
 
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
       - name: Run Claude Code
-        uses: anthropics/claude-code-action@v1
         id: claude
-        with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          prompt: |
-            You are a PR review bot for a Python project.
-            A reviewer left a comment on a pull request. Your job is to triage it and act.
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CLAUDE_STATUS_FILE: /tmp/review-bot-status.json
+        run: |
+          claude -p "$(cat <<'PROMPT'
+          You are a PR review bot for a Python project.
 
-            ## Triage rules
+          ## Context
 
-            Classify the comment as one of:
-            - **APPLY**: Small, clear code change suggestion (≤5 net lines changed). You understand exactly what to change and are confident it's correct.
-            - **FLAG**: Actionable suggestion but too large (>5 lines), ambiguous, or you're not confident in the fix.
-            - **SKIP**: Not actionable — question, praise, discussion, or already addressed.
+          A reviewer left this comment on PR #${{ github.event.pull_request.number }}:
 
-            Be conservative. If unsure, FLAG rather than APPLY.
+          **Comment by @${{ github.event.comment.user.login }}** on file `${{ github.event.comment.path }}` line ${{ github.event.comment.line }}:
+          > ${{ github.event.comment.body }}
 
-            ## If APPLY
+          Diff context:
+          ```
+          ${{ github.event.comment.diff_hunk }}
+          ```
 
-            1. Read the relevant file(s) and understand the surrounding code
-            2. Make the suggested change
-            3. Read `.github/workflows/ci.yml` and run every check/test command listed there, in order. This ensures exact CI parity. Fix any failures (up to 3 attempts per check).
-            4. Once all checks pass, commit with message: `address review: <one-line summary>`
-            5. Push the commit
-            6. Respond describing what you changed and confirming all CI checks passed locally
+          ## Triage rules
 
-            ## If FLAG
+          Classify the comment as one of:
+          - **APPLY**: Small, clear code change suggestion (≤5 net lines changed). You understand exactly what to change and are confident it's correct.
+          - **FLAG**: Actionable suggestion but too large (>5 lines), ambiguous, or you're not confident in the fix.
+          - **SKIP**: Not actionable — question, praise, discussion, or already addressed.
 
-            Do NOT make any code changes. Respond explaining:
-            - What the reviewer is asking for
-            - Why you're flagging it (too large, ambiguous, unsure, etc.)
+          Be conservative. If unsure, FLAG rather than APPLY.
 
-            ## If SKIP
+          ## If APPLY
 
-            Respond briefly acknowledging the comment. Do not make changes.
-          claude_args: |
-            --max-turns 25
-            --dangerously-skip-permissions
+          1. Read the relevant file(s) and understand the surrounding code
+          2. Make the suggested change
+          3. Read `.github/workflows/ci.yml` and run every check/test command listed there, in order. This ensures exact CI parity. Fix any failures (up to 3 attempts per check).
+          4. Once all checks pass, commit with message: `address review: <one-line summary>`
+          5. Push the commit
+          6. Write a JSON file to the path in $CLAUDE_STATUS_FILE: {"action": "APPLIED", "summary": "<what you changed>"}
+
+          ## If FLAG
+
+          Do NOT make any code changes.
+          Write a JSON file to $CLAUDE_STATUS_FILE: {"action": "FLAGGED", "summary": "<what the reviewer wants>", "reasoning": "<why you flagged>"}
+
+          ## If SKIP
+
+          Write a JSON file to $CLAUDE_STATUS_FILE: {"action": "SKIPPED", "summary": "<brief reason>"}
+          PROMPT
+          )" --dangerously-skip-permissions --max-turns 25 --verbose
+
+      - name: Reply to PR comment
+        if: always()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          STATUS_FILE="/tmp/review-bot-status.json"
+          if [ ! -f "$STATUS_FILE" ]; then
+            echo "No status file found, Claude may have failed"
+            exit 0
+          fi
+
+          ACTION=$(python3 -c "import json; print(json.load(open('$STATUS_FILE'))['action'])")
+          SUMMARY=$(python3 -c "import json; print(json.load(open('$STATUS_FILE'))['summary'])")
+
+          if [ "$ACTION" = "APPLIED" ]; then
+            SHA=$(git rev-parse --short HEAD)
+            BODY="Applied this suggestion in $SHA. All CI checks passed locally."
+          elif [ "$ACTION" = "FLAGGED" ]; then
+            REASONING=$(python3 -c "import json; print(json.load(open('$STATUS_FILE')).get('reasoning', 'N/A'))")
+            BODY="Flagged for manual review.\n\n**Summary:** $SUMMARY\n**Reason:** $REASONING"
+          else
+            echo "Action is SKIPPED, no reply needed"
+            exit 0
+          fi
+
+          gh api "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/comments/${{ github.event.comment.id }}/replies" \
+            -f body="$BODY"
 
       - name: Post-process (Slack + wait for CI + re-request review)
         if: always()
@@ -87,4 +133,5 @@ jobs:
           COMMENT_PATH: ${{ github.event.comment.path }}
           COMMENT_LINE: ${{ github.event.comment.line }}
           REPO: ${{ github.repository }}
+          STATUS_FILE: /tmp/review-bot-status.json
         run: python3 .github/scripts/post-process.py

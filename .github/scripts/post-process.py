@@ -7,6 +7,7 @@ import subprocess
 import sys
 import time
 import urllib.request
+from pathlib import Path
 
 # ---------------------------------------------------------------------------
 # Environment
@@ -31,6 +32,7 @@ COMMENT_USER = env("COMMENT_USER")
 COMMENT_PATH = env("COMMENT_PATH")
 COMMENT_LINE = env("COMMENT_LINE")
 REPO = env("REPO")
+STATUS_FILE = env("STATUS_FILE", "/tmp/review-bot-status.json")
 
 
 # ---------------------------------------------------------------------------
@@ -70,32 +72,21 @@ def send_slack(text: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Detect what Claude did by inspecting git log + PR comments
+# Read status from Claude Code's output
 # ---------------------------------------------------------------------------
 
 
-def claude_pushed_commits() -> bool:
-    """Check if the claude step pushed any new commits."""
-    result = run(["git", "log", "--oneline", "-5", "--format=%an|%s"])
-    if result.returncode != 0:
-        return False
-    for line in result.stdout.strip().splitlines():
-        if "address review:" in line.lower():
-            return True
-    return False
-
-
-def claude_flagged() -> bool:
-    """Check if Claude's PR comment indicates a FLAG."""
-    comments = gh_api("GET", f"/repos/{REPO}/pulls/{PR_NUMBER}/comments") or []
-    for c in reversed(comments):
-        if c["user"]["login"].endswith("[bot]") and c.get("in_reply_to_id"):
-            body = c.get("body", "").lower()
-            if "flag" in body or "too large" in body or "ambiguous" in body or "unsure" in body:
-                return True
-            if "applied" in body or "committed" in body or "pushed" in body:
-                return False
-    return False
+def read_status() -> dict:
+    """Read the status JSON written by Claude Code."""
+    p = Path(STATUS_FILE)
+    if not p.exists():
+        print(f"Status file not found: {STATUS_FILE}")
+        return {"action": "UNKNOWN"}
+    try:
+        return json.loads(p.read_text())
+    except json.JSONDecodeError as e:
+        print(f"Failed to parse status file: {e}", file=sys.stderr)
+        return {"action": "UNKNOWN"}
 
 
 # ---------------------------------------------------------------------------
@@ -189,24 +180,26 @@ def rerequest_review() -> None:
 
 
 def main() -> None:
-    pushed = claude_pushed_commits()
-    flagged = claude_flagged()
+    status = read_status()
+    action = status.get("action", "UNKNOWN")
+    summary = status.get("summary", "")
+    reasoning = status.get("reasoning", "")
 
-    print(f"Post-process: pushed={pushed}, flagged={flagged}")
+    print(f"Post-process: action={action}, summary={summary}")
 
-    # Send Slack notification if Claude flagged the comment
-    if flagged:
+    if action == "FLAGGED":
         line_ref = f"{COMMENT_PATH}:{COMMENT_LINE}" if COMMENT_PATH else "N/A"
         send_slack(
             f":mag: *PR Review needs your attention*\n"
             f"*PR:* <{PR_URL}|{PR_TITLE}>\n"
             f"*Comment by:* @{COMMENT_USER}\n"
             f"*File:* `{line_ref}`\n\n"
+            f"*Suggestion:* {summary}\n"
+            f"*Why flagged:* {reasoning}\n\n"
             f"<{COMMENT_URL}|View comment>"
         )
 
-    # If Claude pushed changes, wait for CI before re-requesting review
-    if pushed:
+    if action == "APPLIED":
         ci_passed = wait_for_ci()
         if ci_passed and all_comments_addressed():
             rerequest_review()
@@ -217,7 +210,7 @@ def main() -> None:
                 f"*Comment by:* @{COMMENT_USER}\n"
                 f"<{COMMENT_URL}|View comment>"
             )
-    elif flagged and all_comments_addressed():
+    elif action in ("FLAGGED", "SKIPPED") and all_comments_addressed():
         rerequest_review()
 
 
