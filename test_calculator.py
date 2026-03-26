@@ -1,4 +1,4 @@
-from calculator import add, subtract, multiply, divide, power
+from calculator import add, subtract, multiply, divide, power, factorial
 
 
 def test_add():
@@ -19,3 +19,8 @@ def test_divide():
 
 def test_power():
     assert power(2, 3) == 8
+
+
+def test_factorial():
+    assert factorial(5) == 120
+    assert factorial(0) == 1

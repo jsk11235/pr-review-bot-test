@@ -23,3 +23,15 @@ def power(a, b):
     for i in range(b - 1):
         result = result * a
     return result
+
+
+def factorial(n):
+    """Calculate the factorial of n."""
+    if n < 0:
+        raise ValueError("Factorial not defined for negative numbers")
+    result = 1
+    i = 2
+    while i <= n:
+        result = result * i
+        i = i + 1
+    return result
