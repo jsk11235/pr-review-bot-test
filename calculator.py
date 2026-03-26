@@ -29,7 +29,4 @@ def modulo(a, b):
     """Return the remainder of a divided by b."""
     if b == 0:
         raise ValueError("Cannot modulo by zero")
-    result = a
-    while result >= b:
-        result = result - b
-    return result
+    return a % b
