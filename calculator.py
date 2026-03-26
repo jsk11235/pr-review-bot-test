@@ -23,3 +23,13 @@ def power(a, b):
     for i in range(b - 1):
         result = result * a
     return result
+
+
+def modulo(a, b):
+    """Return the remainder of a divided by b."""
+    if b == 0:
+        raise ValueError("Cannot modulo by zero")
+    result = a
+    while result >= b:
+        result = result - b
+    return result
