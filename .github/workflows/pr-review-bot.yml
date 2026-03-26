@@ -1,0 +1,90 @@
+name: PR Review Bot
+
+on:
+  pull_request_review_comment:
+    types: [created]
+
+jobs:
+  handle-review-comment:
+    # Skip comments from bots to prevent infinite loops
+    if: >-
+      !endsWith(github.event.comment.user.login, '[bot]') &&
+      github.event.comment.user.login != 'github-actions'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: read
+    # Serialize per PR to avoid push conflicts
+    concurrency:
+      group: pr-review-bot-${{ github.event.pull_request.number }}
+      cancel-in-progress: false
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install test dependencies
+        run: pip install pytest ruff
+
+      - name: Run Claude Code
+        uses: anthropics/claude-code-action@v1
+        id: claude
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: |
+            You are a PR review bot for a Python project.
+            A reviewer left a comment on a pull request. Your job is to triage it and act.
+
+            ## Triage rules
+
+            Classify the comment as one of:
+            - **APPLY**: Small, clear code change suggestion (≤5 net lines changed). You understand exactly what to change and are confident it's correct.
+            - **FLAG**: Actionable suggestion but too large (>5 lines), ambiguous, or you're not confident in the fix.
+            - **SKIP**: Not actionable — question, praise, discussion, or already addressed.
+
+            Be conservative. If unsure, FLAG rather than APPLY.
+
+            ## If APPLY
+
+            1. Read the relevant file(s) and understand the surrounding code
+            2. Make the suggested change
+            3. Read `.github/workflows/ci.yml` and run every check/test command listed there, in order. This ensures exact CI parity. Fix any failures (up to 3 attempts per check).
+            4. Once all checks pass, commit with message: `address review: <one-line summary>`
+            5. Push the commit
+            6. Respond describing what you changed and confirming all CI checks passed locally
+
+            ## If FLAG
+
+            Do NOT make any code changes. Respond explaining:
+            - What the reviewer is asking for
+            - Why you're flagging it (too large, ambiguous, unsure, etc.)
+
+            ## If SKIP
+
+            Respond briefly acknowledging the comment. Do not make changes.
+          claude_args: |
+            --max-turns 25
+            --dangerously-skip-permissions
+
+      - name: Post-process (Slack + wait for CI + re-request review)
+        if: always()
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          COMMENT_URL: ${{ github.event.comment.html_url }}
+          COMMENT_USER: ${{ github.event.comment.user.login }}
+          COMMENT_PATH: ${{ github.event.comment.path }}
+          COMMENT_LINE: ${{ github.event.comment.line }}
+          REPO: ${{ github.repository }}
+        run: python3 .github/scripts/post-process.py
