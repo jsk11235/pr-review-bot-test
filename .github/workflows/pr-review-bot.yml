@@ -92,7 +92,7 @@ jobs:
 
           Write a JSON file to $CLAUDE_STATUS_FILE: {"action": "SKIPPED", "summary": "<brief reason>"}
           PROMPT
-          )" --dangerously-skip-permissions --max-turns 25 --output-format stream-json 2>&1 | tee /tmp/claude-transcript.log | tail -1
+          )" --dangerously-skip-permissions --max-turns 25 --verbose --output-format stream-json 2>&1 | tee /tmp/claude-transcript.log | tail -1
 
       - name: Show Claude Code transcript
         if: always()
