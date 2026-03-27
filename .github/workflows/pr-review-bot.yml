@@ -22,7 +22,6 @@ jobs:
 
     steps:
       # Use PAT for checkout so bot pushes trigger CI workflows
-      # (GITHUB_TOKEN pushes don't trigger workflows by design)
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.ref }}
@@ -43,6 +42,15 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      # Alert: bot is starting work
+      - name: React to comment (in progress)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh api "repos/${{ github.repository }}/pulls/comments/${{ github.event.comment.id }}/reactions" \
+            -f content="eyes"
+          echo "Reacted with 👀 to indicate bot is working"
 
       - name: Run Claude Code
         id: claude
@@ -92,13 +100,7 @@ jobs:
 
           Write a JSON file to $CLAUDE_STATUS_FILE: {"action": "SKIPPED", "summary": "<brief reason>"}
           PROMPT
-          )" --dangerously-skip-permissions --max-turns 25 --verbose 2>&1 | tee /tmp/claude-transcript.log
-
-      - name: Show Claude Code transcript
-        if: always()
-        run: |
-          echo "=== Claude Code Transcript ==="
-          cat /tmp/claude-transcript.log 2>/dev/null || echo "No transcript found"
+          )" --dangerously-skip-permissions --max-turns 25
 
       - name: Reply to PR comment
         if: always()
@@ -108,6 +110,8 @@ jobs:
           STATUS_FILE="/tmp/review-bot-status.json"
           if [ ! -f "$STATUS_FILE" ]; then
             echo "No status file found, Claude may have failed"
+            gh api "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/comments/${{ github.event.comment.id }}/reactions" \
+              -f content="confused"
             exit 0
           fi
 
@@ -117,11 +121,15 @@ jobs:
           if [ "$ACTION" = "APPLIED" ]; then
             SHA=$(git rev-parse --short HEAD)
             BODY="Applied this suggestion in $SHA. All CI checks passed locally."
+            gh api "repos/${{ github.repository }}/pulls/comments/${{ github.event.comment.id }}/reactions" \
+              -f content="rocket"
           elif [ "$ACTION" = "FLAGGED" ]; then
             REASONING=$(python3 -c "import json; print(json.load(open('$STATUS_FILE')).get('reasoning', 'N/A'))")
             BODY="Flagged for manual review.\n\n**Summary:** $SUMMARY\n**Reason:** $REASONING"
           else
             echo "Action is SKIPPED, no reply needed"
+            gh api "repos/${{ github.repository }}/pulls/comments/${{ github.event.comment.id }}/reactions" \
+              -f content="+1"
             exit 0
           fi
 
