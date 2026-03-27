@@ -44,13 +44,22 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
       # Alert: bot is starting work
-      - name: React to comment (in progress)
+      - name: Notify in-progress
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
         run: |
           gh api "repos/${{ github.repository }}/pulls/comments/${{ github.event.comment.id }}/reactions" \
             -f content="eyes"
-          echo "Reacted with 👀 to indicate bot is working"
+
+          if [ -n "$SLACK_WEBHOOK_URL" ]; then
+            curl -s -X POST "$SLACK_WEBHOOK_URL" \
+              -H "Content-Type: application/json" \
+              -d "$(cat <<EOF
+          {"blocks":[{"type":"section","text":{"type":"mrkdwn","text":":hourglass_flowing_sand: *Review bot working*\n*PR:* <${{ github.event.pull_request.html_url }}|${{ github.event.pull_request.title }}>\n*Comment by:* @${{ github.event.comment.user.login }} on \`${{ github.event.comment.path }}:${{ github.event.comment.line }}\`\n<${{ github.event.comment.html_url }}|View comment>"}}]}
+          EOF
+          )"
+          fi
 
       - name: Run Claude Code
         id: claude
