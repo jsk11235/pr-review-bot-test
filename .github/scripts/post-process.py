@@ -215,8 +215,15 @@ def main() -> None:
 
     if action == "APPLIED":
         ci_passed = wait_for_ci()
-        if ci_passed and all_comments_addressed():
-            rerequest_review()
+        if ci_passed:
+            send_slack(
+                f":white_check_mark: *Review suggestion applied and CI passed*\n"
+                f"*PR:* <{PR_URL}|{PR_TITLE}>\n"
+                f"*Summary:* {summary}\n"
+                f"<{COMMENT_URL}|View comment>"
+            )
+            if all_comments_addressed():
+                rerequest_review()
         elif not ci_passed:
             send_slack(
                 f":x: *CI failed after applying review suggestion*\n"
