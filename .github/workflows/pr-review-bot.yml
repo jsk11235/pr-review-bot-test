@@ -92,39 +92,13 @@ jobs:
 
           Write a JSON file to $CLAUDE_STATUS_FILE: {"action": "SKIPPED", "summary": "<brief reason>"}
           PROMPT
-          )" --dangerously-skip-permissions --max-turns 25 --verbose --output-format stream-json 2>&1 | tee /tmp/claude-transcript.log | tail -1
+          )" --dangerously-skip-permissions --max-turns 25 --verbose 2>&1 | tee /tmp/claude-transcript.log
 
       - name: Show Claude Code transcript
         if: always()
         run: |
-          echo "=== Claude Code Tool Calls ==="
-          python3 -c "
-          import json, sys
-          for line in open('/tmp/claude-transcript.log'):
-              line = line.strip()
-              if not line:
-                  continue
-              try:
-                  msg = json.loads(line)
-              except json.JSONDecodeError:
-                  continue
-              if msg.get('type') == 'assistant' and 'content' in msg:
-                  for block in msg['content']:
-                      if block.get('type') == 'tool_use':
-                          print(f\"TOOL: {block['name']}\")
-                          inp = block.get('input', {})
-                          if block['name'] == 'Bash':
-                              print(f\"  cmd: {inp.get('command', '')[:200]}\")
-                          elif block['name'] in ('Read', 'Write', 'Edit'):
-                              print(f\"  file: {inp.get('file_path', '')}\")
-                          print()
-              elif msg.get('type') == 'tool_result':
-                  # Show abbreviated tool results
-                  content = str(msg.get('content', ''))[:200]
-                  if content:
-                      print(f\"  result: {content}\")
-                      print()
-          "
+          echo "=== Claude Code Transcript ==="
+          cat /tmp/claude-transcript.log 2>/dev/null || echo "No transcript found"
 
       - name: Reply to PR comment
         if: always()
