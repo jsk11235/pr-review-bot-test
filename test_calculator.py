@@ -19,6 +19,7 @@ def test_divide():
 
 def test_power():
     assert power(2, 3) == 8
+    assert power(0, 0) == 1
 
 
 def test_factorial():

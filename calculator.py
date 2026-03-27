@@ -19,6 +19,8 @@ def divide(a, b):
 
 def power(a, b):
     """Raise a to the power of b."""
+    if b == 0:
+        return 1
     result = a
     for i in range(b - 1):
         result = result * a
